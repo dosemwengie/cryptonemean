@@ -1,5 +1,5 @@
 var mongoose = require('mongoose');
-var mongodb = 'mongodb://localhost/coinmarketcap';
+var mongodb = 'mongodb://localhost/coinmarket';
 var _db = mongoose.createConnection(mongodb);
 mongoose.Promise = global.Promise;
 var coinschema = mongoose.Schema({
