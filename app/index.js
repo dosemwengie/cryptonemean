@@ -14,15 +14,16 @@ db.on('error', console.error.bind(console, "DB ERROR"));
 var MongoClient = require('mongodb').MongoClient;
 var dblink = "mongodb://localhost:27017/"
 coinURL='https://api.coinmarketcap.com/v1/ticker/?convert=USD&limit=0';
-var collection="coinmarket"
+var collection="coinmarket";
+var userTable = "UserCoins";
 MongoClient.connect(dblink, function(err, database){
 	if (err) throw err;
 	var db = database.db("localhost");
 	axios.get(coinURL)
 		.then(function(response) {
 			var coins = response.data;
-			coins.forEach(function(coin){
-			db.collection(collection).updateOne({name:coin.id},{ $set : {
+			var getData = function(coin){ 
+				db.collection(collection).updateOne({name:coin.id},{ $set : {
 				name:coin.id, 
 				symbol: coin.symbol, 
 				rank: coin.rank, 
@@ -39,9 +40,16 @@ MongoClient.connect(dblink, function(err, database){
 				{ upsert: true }, function(err,res){
 				console.log(res.result);
 			});
+		};
+		coins.map(function(coin){
+		getData(coin,function(){
+			db.collection(userTable).find({},function(err,res){
+			console.log(res);
+			});
 		});
-	});
-	});
+		});
+		});
+});
 		
 		
 	
