@@ -35,10 +35,12 @@ class NMC():
 			self.parse_online_data()
 
 		elif self.processor == 'consumer':
+			self.load_redis()
 			print "Consuming Data"
-			self.consumer = kafka.KafkaConsumer()
+			self.consumer = kafka.KafkaConsumer(self.topic)
 			self.fetch_queue_data()
 		elif self.processor == 'processor':
+			self.load_redis()
 			#process data
 		else:
 			print("Missing processor(producer|consumer)")
@@ -72,6 +74,8 @@ class NMC():
 	def fetch_queue_data(self):
 		print "Fetching Data from Topic"
 		print "Using Topic: %s"%(self.topic)
+		records=self.consumer.poll(timeout_ms=0)
+		print(records)
 		
 
 
