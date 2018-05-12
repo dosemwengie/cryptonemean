@@ -37,13 +37,14 @@ class NMC():
 		elif self.processor == 'consumer':
 			self.load_redis()
 			print "Consuming Data"
-			self.consumer = kafka.KafkaConsumer(self.topic)
+			self.consumer = kafka.KafkaConsumer(self.topic,auto_offset_reset='earliest',consumer_timeout_ms=1000)
 			self.fetch_queue_data()
 		elif self.processor == 'processor':
 			self.load_redis()
+			
 			#process data
 		else:
-			print("Missing processor(producer|consumer)")
+			print("Missing processor(producer|consumer|processor)")
 			sys.exit(1)
 
 	def load_config(self):
@@ -64,7 +65,7 @@ class NMC():
 		
 	def push_data(self,message):
 		print "Pushing message: %s"%(self.online_data.get(message))
-		_msg = json.dumps(message)
+		_msg = json.dumps(self.online_data.get(message))
 		self.producer.send(self.topic,_msg)
 		return True
 
@@ -74,8 +75,8 @@ class NMC():
 	def fetch_queue_data(self):
 		print "Fetching Data from Topic"
 		print "Using Topic: %s"%(self.topic)
-		records=self.consumer.poll(timeout_ms=0)
-		print(records)
+		for records in self.consumer:
+			print(records)
 		
 
 
