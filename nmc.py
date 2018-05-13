@@ -39,6 +39,7 @@ class NMC():
 			print "Consuming Data"
 			self.consumer = kafka.KafkaConsumer(self.topic,auto_offset_reset='earliest',consumer_timeout_ms=1000)
 			self.fetch_queue_data()
+
 		elif self.processor == 'processor':
 			self.load_redis()
 			
@@ -76,7 +77,12 @@ class NMC():
 		print "Fetching Data from Topic"
 		print "Using Topic: %s"%(self.topic)
 		for records in self.consumer:
-			print(records)
+			value = json.loads(records.value)
+			coin_key = value.get('symbol')
+			coin_score = value.get('last_updated')
+			print(coin_key,coin_score)
+			self.redis.zadd(coin_key,records.value,coin_score)
+			
 		
 
 
