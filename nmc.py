@@ -1,10 +1,11 @@
-import json
+import json	
 import sys
 import requests
 from optparse import OptionParser
 import redis
 import kafka
 from functools import partial
+from trend.trend import determine_trend
 
 
 ##TO-DO make sure each process exclusively runs(mutex, locks)
@@ -42,11 +43,21 @@ class NMC():
 
 		elif self.processor == 'processor':
 			self.load_redis()
-			
+		    	self.process_data()	
 			#process data
 		else:
 			print("Missing processor(producer|consumer|processor)")
 			sys.exit(1)
+
+	def process_data(self):
+		for key in self.redis.keys():
+			prices=[]
+			data=self.redis.zrange(key,0,-1)
+			for record in data:
+				record = json.loads(record)
+				price = record['quotes']['USD']['price']
+				prices.append(price)
+			determine_trend(prices,key)
 
 	def load_config(self):
 		print "Loading Configuration File"
@@ -89,5 +100,6 @@ class NMC():
 if __name__ == '__main__':
 	conf,processor = sys.argv[1:]
 	NMC(conf,processor)
+
 
 
