@@ -5,18 +5,19 @@ import matplotlib.pyplot as plt
 
 class determine_trend():
 	def __init__(self,array,name):
+		self.name = name
 		self.array = array
 		self.threshold = 0.65
 		self.size = len(array)
 		print(array)
-		plt.plot(range(self.size),array,label=name)
-		plt.legend(loc='best')
 		self.determine_trend()
 
 	def determine_trend(self):
 		if len(self.array)<2:
 			print("Not enough datapoints")
 			return
+		plt.plot(range(self.size),self.array,label=self.name)
+		plt.legend(loc='best')
 		
 		upward=False if self.array[1]<self.array[0] else True
 		prev_point= (0,self.array[0])
