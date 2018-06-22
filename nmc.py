@@ -57,7 +57,8 @@ class NMC():
 				record = json.loads(record)
 				price = record['quotes']['USD']['price']
 				prices.append(price)
-			determine_trend(prices,key)
+			dt = determine_trend(prices,key)
+			print(dt.coef)
 
 	def load_config(self):
 		print "Loading Configuration File"
