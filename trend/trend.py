@@ -10,14 +10,15 @@ class determine_trend():
 		self.threshold = 0.65
 		self.size = len(array)
 		print(array)
+		self.results = {}
 		self.determine_trend()
 
 	def determine_trend(self):
 		if len(self.array)<2:
 			print("Not enough datapoints")
-			return
-		plt.plot(range(self.size),self.array,label=self.name)
-		plt.legend(loc='best')
+			return self.results
+		#plt.plot(range(self.size),self.array,label=self.name)
+		#plt.legend(loc='best')
 		
 		upward=False if self.array[1]<self.array[0] else True
 		prev_point= (0,self.array[0])
@@ -61,7 +62,9 @@ class determine_trend():
 		else:
 			result='sideways'
 		print("Analysis: Trend is %s"%(result))
-		plt.title(result)
-		plt.show()
+		self.results = {'x':range(self.size),'y':self.array,'label':self.name,'location':'best','result':result}
+		return self.results
+		#plt.title(result)
+		#plt.show()
 			
 				

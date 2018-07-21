@@ -50,14 +50,27 @@ class NMC():
 			sys.exit(1)
 
 	def process_data(self):
-		for key in self.redis.keys():
+		keys = self.redis.keys()
+ 		import matplotlib.pyplot as plt
+		nrows = len(keys)/2 if len(keys)%2==0 else (len(keys)+1)/2
+		ncols = 2
+		f,ax = plt.subplots(nrows=nrows,ncols=ncols)		
+		for idx,key in enumerate(keys):
 			prices=[]
 			data=self.redis.zrange(key,0,-1)
+			x=idx/ncols
+			y=idx%ncols
 			for record in data:
 				record = json.loads(record)
 				price = record['quotes']['USD']['price']
 				prices.append(price)
-			determine_trend(prices,key)
+			resp = determine_trend(prices,key).results
+			print(resp)
+			if resp:
+				ax[x, y].plot(resp['x'],resp['y'],label=resp['label'])
+				ax[x, y].legend(loc=resp['location'])
+				ax[x, y].set_title(resp['result'])
+		plt.show()
 
 	def load_config(self):
 		print "Loading Configuration File"
