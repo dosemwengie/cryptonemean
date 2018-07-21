@@ -4,37 +4,27 @@ from sklearn import linear_model
 import matplotlib.pyplot as plt
 
 
+
 class determine_trend():
-    def __init__(self, array, name, dataframe):
-        self.name = name
-        self.array = array
-        self.dataframe = dataframe
-        print(dataframe)
-        return
-        self.threshold = 0.65
-        self.size = len(array)
-        self.r2, self.coef = None, None
-        self.predict_model()
+	def __init__(self,array,name):
+		self.name = name
+		self.array = array
+		self.threshold = 0.65
+		self.size = len(array)
+		self.r2,self.coef = None,None
+		self.predict_model()
+		#self.determine_trend()
 
-    # self.determine_trend()
-
-    def predict_model(self):
-        X = pd.DataFrame(range(self.size), columns=["X Values"])
-        Y = pd.DataFrame(self.array, columns=["Y Values"])
-        lm = linear_model.LinearRegression()
-        model = lm.fit(X, Y)
-        self.r2 = model.score(X, Y)
-        self.coef = model.coef_[0][0]
-
-    # print("R2: ",self.r2)
-    # print("Coef: ",self.coef)
-
-    def determine_trend(self):
-        if len(self.array) < 2:
-            print("Not enough datapoints")
-            return
-        plt.plot(range(self.size), self.array, label=self.name)
-        plt.legend(loc='best')
+	def predict_model(self):
+		X = pd.DataFrame(range(self.size),columns=["X Values"])
+		Y = pd.DataFrame(self.array,columns=["Y Values"])
+		lm = linear_model.LinearRegression()
+		model = lm.fit(X,Y)
+		self.r2 = model.score(X,Y)
+		self.coef = model.coef_[0][0]
+		#print("R2: ",self.r2)
+		#print("Coef: ",self.coef)
+		
 
 	def determine_trend(self):
 		if len(self.array)<2:

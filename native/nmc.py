@@ -1,4 +1,4 @@
-import json
+import json	
 import sys
 import requests
 from optparse import OptionParser
@@ -6,11 +6,10 @@ import redis
 import kafka
 from functools import partial
 from trend.trend import determine_trend
-import pandas as pd
+
 
 ##TO-DO make sure each process exclusively runs(mutex, locks)
-URL = 'https://api.coinmarketcap.com/v2/ticker/?convert=USD&limit=10'
-
+URL='https://api.coinmarketcap.com/v2/ticker/?convert=USD&limit=10'
 
 class NMC():
 	def __init__(self,config_file,processor):
@@ -107,5 +106,8 @@ class NMC():
 
 
 if __name__ == '__main__':
-    conf, processor = sys.argv[1:]
-    NMC(conf, processor)
+	conf,processor = sys.argv[1:]
+	NMC(conf,processor)
+
+
+
