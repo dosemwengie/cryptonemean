@@ -1,4 +1,6 @@
 import numpy as np
+import pandas as pd
+from sklearn import linear_model
 import matplotlib.pyplot as plt
 
 
@@ -9,9 +11,20 @@ class determine_trend():
 		self.array = array
 		self.threshold = 0.65
 		self.size = len(array)
-		print(array)
-		self.results = {}
-		self.determine_trend()
+		self.r2,self.coef = None,None
+		self.predict_model()
+		#self.determine_trend()
+
+	def predict_model(self):
+		X = pd.DataFrame(range(self.size),columns=["X Values"])
+		Y = pd.DataFrame(self.array,columns=["Y Values"])
+		lm = linear_model.LinearRegression()
+		model = lm.fit(X,Y)
+		self.r2 = model.score(X,Y)
+		self.coef = model.coef_[0][0]
+		#print("R2: ",self.r2)
+		#print("Coef: ",self.coef)
+		
 
 	def determine_trend(self):
 		if len(self.array)<2:
@@ -36,8 +49,8 @@ class determine_trend():
 			highs.append(prev_point)
 		else:
 			lows.append(prev_point)
-		print(lows)
-		print(highs)
+		#print(lows)
+		#print(highs)
 		uptrend=downtrend=0
 		init_low=lows[0][1]
 		init_high=highs[0][1]
@@ -54,7 +67,7 @@ class determine_trend():
 				downtrend+=1.0
 			init_high=high
 		trend_total=uptrend+downtrend
-		print(downtrend,uptrend,trend_total)
+		#print(downtrend,uptrend,trend_total)
 		if uptrend/trend_total > self.threshold:
 			result='uptrend'
 		elif downtrend/trend_total > self.threshold:
@@ -62,9 +75,8 @@ class determine_trend():
 		else:
 			result='sideways'
 		print("Analysis: Trend is %s"%(result))
-		self.results = {'x':range(self.size),'y':self.array,'label':self.name,'location':'best','result':result}
-		return self.results
-		#plt.title(result)
-		#plt.show()
+		result = ''.join([result," r2 = ",str(self.r2)," coef ",str(self.coef)])
+		plt.title(result)
+		plt.show()
 			
 				
