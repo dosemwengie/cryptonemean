@@ -1,6 +1,7 @@
 import boto3
 
 db = boto3.client('dynamodb',endpoint_url='http://localhost:8000')
+
 db.delete_table(TableName='users')
 db.create_table(
 TableName='users',
@@ -23,6 +24,7 @@ ProvisionedThroughput={
     }
 
 )
+
 
 db.delete_table(TableName='coins')
 db.create_table(

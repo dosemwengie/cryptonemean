@@ -3,6 +3,7 @@ import boto3
 import json
 import requests
 import os
+from datetime import datetime
 
 
 #coin_table=boto3.resource('dynamodb',endpoint_url='http://localhost:8000').Table('coins')
@@ -49,7 +50,7 @@ class NMC():
 			self.user_table = boto3.resource('dynamodb').Table('users')
 			
 	def fetch_online_data(self):
-		print("Getting online data")
+		print("Getting online data @ %s"%(datetime.now()))
 		response = requests.get(URL)
 		self.online_data = response.json().get('data')
 
@@ -133,6 +134,8 @@ class NMC():
 				self.do_transaction(coin,user_data,current_price,action='sell')
 		print(user_data)
 		self.user_table.put_item(Item=user_data)
+		print
+
 	def do_transaction(self,coin,user_data,current_price,action=None):
 		wallet = user_data['wallet']
 		allocation = user_data['preference'][coin]['allocation']
