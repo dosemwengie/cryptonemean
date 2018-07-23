@@ -4,11 +4,13 @@ import json
 import requests
 import os
 from datetime import datetime
+import logging
 
 
 #coin_table=boto3.resource('dynamodb',endpoint_url='http://localhost:8000').Table('coins')
 #user_table=boto3.resource('dynamodb',endpoint_url='http://localhost:8000').Table('users')
 
+logging.basicConfig(format='%(asctime)s %(message)s',level=logging.INFO)
 
 user_example = {'preference': {
   'XLM': {'allocation': Decimal('0.25'),
@@ -50,7 +52,7 @@ class NMC():
 			self.user_table = boto3.resource('dynamodb').Table('users')
 			
 	def fetch_online_data(self):
-		print("Getting online data @ %s"%(datetime.now()))
+		logging.info("Getting online data @ %s"%(datetime.now()))
 		response = requests.get(URL)
 		self.online_data = response.json().get('data')
 
@@ -65,7 +67,7 @@ class NMC():
 			
 
 	def insert_data(self):
-		print("Inserting Data into DynamoDB")
+		logging.info("Inserting Data into DynamoDB")
 		with self.coin_table.batch_writer() as batch:
 			for coin in self.online_data:
 				if coin not in self.online_data:
@@ -105,9 +107,9 @@ class NMC():
 		map(self.data_evaluation,users)
 
 	def data_evaluation(self,user_data):
-		print("User: %s"%(user_data['name']))
+		logging.info("User: %s"%(user_data['name']))
 		for coin in user_data['preference']:
-			print("Checking coin: %s"%(coin))
+			logging.info("Checking coin: %s"%(coin))
 			coin_data = user_data['preference'][coin]
 			can_sell, can_buy = False, False
 			current_price = self.online_data[coin]['quotes']['USD']['price']
@@ -115,8 +117,8 @@ class NMC():
 			percentages = [ self.online_data[coin]['quotes']['USD'][x] for x in self.online_data[coin]['quotes']['USD'] if x.startswith('percent_change')]
 			buy_percentage = coin_data['buy']*100
 			sell_percentage = coin_data['sell']*100
-			print("Percentages: %s"%(percentages))
-			print(coin_data)
+			logging.info("Percentages: %s"%(percentages))
+			logging.info(coin_data)
 			if coin_data['coin_amount'] == 0:
 				if buy_percentage >= min(percentages):
 					can_buy = True
@@ -127,14 +129,14 @@ class NMC():
 				elif (current_price - worth_per_coin)/100 >= sell_percentage:
 					can_sell = True 
 			
-			print("Before Wallet %s"%(user_data['wallet']))
+			logging.info("Before Wallet %s"%(user_data['wallet']))
 			if can_buy:
 				self.do_transaction(coin,user_data,current_price,action='buy')
 			if can_sell:
 				self.do_transaction(coin,user_data,current_price,action='sell')
-		print(user_data)
+		logging.info(user_data)
 		self.user_table.put_item(Item=user_data)
-		print
+		logging.info
 
 	def do_transaction(self,coin,user_data,current_price,action=None):
 		wallet = user_data['wallet']
@@ -143,7 +145,7 @@ class NMC():
 		quota = user_data['preference'][coin]['quota']
 		holdings = user_data['preference'][coin]['holdings']
 		if quota:
-			print("Quota reached!")
+			logging.info("Quota reached!")
 			return
 
 		if action == 'buy':
@@ -168,9 +170,9 @@ class NMC():
 		user_data['wallet'] += limit * wallet_factor
 		user_data['preference'][coin]['holdings'] += real_limit * holding_coin_factor
 		user_data['preference'][coin]['coin_amount'] += new_coins * holding_coin_factor
-		print("User %s, %s:%s worth of %s"%(user_data["name"],action,real_limit,coin))
-		print("After Wallet %s"%(user_data['wallet']))
-		print("Holdings %s\nCoin Amount %s"%(user_data['preference'][coin]['holdings'],user_data['preference'][coin]['coin_amount']))
+		logging.info("User %s, %s:%s worth of %s"%(user_data["name"],action,real_limit,coin))
+		logging.info("After Wallet %s"%(user_data['wallet']))
+		logging.info("Holdings %s\nCoin Amount %s"%(user_data['preference'][coin]['holdings'],user_data['preference'][coin]['coin_amount']))
 
 _=NMC()
 
