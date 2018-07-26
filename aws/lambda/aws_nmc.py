@@ -6,7 +6,7 @@ import os
 from datetime import datetime
 from binance.client import Client
 import logging
-
+from time import sleep
 
 #coin_table=boto3.resource('dynamodb',endpoint_url='http://localhost:8000').Table('coins')
 #user_table=boto3.resource('dynamodb',endpoint_url='http://localhost:8000').Table('users')
@@ -15,12 +15,18 @@ logging.basicConfig(format='%(asctime)s %(message)s',level=logging.INFO)
 
 user_example = {'preference': {
   'XLM': {'allocation': Decimal('0.25'),
+   'desired_action': None,
+   'lastOrder': None,
+   'lastOrderId': None,
    'buy': Decimal('-0.1'),
    'coin_amount': Decimal('0'),
    'holdings': Decimal('0'),
    'quota': False,
    'sell': Decimal('0.10')},
   'ADA': {'allocation': Decimal('0.25'),
+   'desired_action': None,
+   'lastOrder': None,
+   'lastOrderId': None,
    'buy': Decimal('-0.10'),
    'coin_amount': Decimal('0'),
    'holdings': Decimal('0'),
@@ -35,6 +41,7 @@ BASE_COIN = 'USDT'
 URL = 'https://api.coinmarketcap.com/v2/ticker/?convert=USD&limit=50'
 FEE = Decimal('0.001')
 THRESHOLD=86400
+TRANSACTION_WAIT=10
 
 class NMC():
 	def __init__(self):
@@ -46,7 +53,7 @@ class NMC():
 		self.client = Client(self.api_key, self.api_secret)
 		self.set_db()
 		self.fetch_online_data()
-		self.insert_data()
+		#self.insert_data()
 		self.map_user_evaluation()
 
 	def get_api_s(self):
@@ -123,7 +130,7 @@ class NMC():
 			coin_data = user_data['preference'][coin]
 			can_sell, can_buy = False, False
 			current_price = self.online_data[coin]['quotes']['USD']['price']
-			current_price=Decimal(current_price)
+			current_price = Decimal(current_price)
 			percentages = [ self.online_data[coin]['quotes']['USD'][x] for x in self.online_data[coin]['quotes']['USD'] if x.startswith('percent_change')]
 			buy_percentage = coin_data['buy']*100
 			sell_percentage = coin_data['sell']*100
@@ -134,9 +141,10 @@ class NMC():
 					can_buy = True
 			else:
 				worth_per_coin = coin_data['coin_amount']/coin_data['holdings']
-				if (current_price - worth_per_coin)/100 <= buy_percentage:
+				desired_action = user_data['preference'][coin]['desired_action']
+				if (current_price - worth_per_coin)/100 <= buy_percentage and desired_action == 'buy':
 					can_buy = True
-				elif (current_price - worth_per_coin)/100 >= sell_percentage:
+				elif (current_price - worth_per_coin)/100 >= sell_percentage and desired_action == 'sell':
 					can_sell = True 
 			
 			logging.info("Before Wallet %s"%(user_data['wallet']))
@@ -148,22 +156,67 @@ class NMC():
 		self.user_table.put_item(Item=user_data)
 		print
 
+	def get_balance(self, coin=None):
+		account = self.client.get_account()		
+		if coin is None:		
+			balances = [x for x in account['balances'] if float(x['free']) > 0]
+		else:
+			balances = [x for x in account['balances'] if float(x['free']) > 0 and x['asset'] == coin]
+		balance = 0
+		for ticker in balances:
+			symbol = ticker['asset']
+			amount = float(ticker['free'])
+			current_price = self.client.get_symbol_ticker(symbol=''.join([symbol,BASE_COIN]))
+			current_price = current_price.get('price')
+			balance += current_price*amount
+		return balance
+
+	def get_wallet(self, asset=None):
+		if asset is None:
+			asset=BASE_COIN
+		balance = self.client.get_asset_balance(asset=asset)
+		balance = balance.get('free')
+		return Decimal(balance)
+
+	def getOrderStatus(self,coin,user_data,orderId=None):
+		if orderId is None:
+			orderId = user_data['preference'][coin]['lastOrderId']
+		symbol = ''.join([coin, BASE_COIN])
+		result = self.client.get_order(symbol=symbol, orderId=orderId)
+		status = result['status']
+		logging.info("Coin: %s, status: %s"%(coin,status))
+		return status == 'FILLED'
+
 	def do_transaction(self,coin,user_data,current_price,action=None):
-		wallet = user_data['wallet']
+		wallet = self.get_wallet()
 		allocation = user_data['preference'][coin]['allocation']
 		coin_amount = user_data['preference'][coin]['coin_amount']
 		quota = user_data['preference'][coin]['quota']
 		holdings = user_data['preference'][coin]['holdings']
-		if quota:
+		desired_price = self.online_data[coin]['quotes']['USD']['price']
+		symbol = ''.join([coin, BASE_COIN])
+		if quota and action == 'buy':
 			logging.info("Quota reached!")
 			return
+		last_status = self.getOrderStatus(coin,user_data)
+		
+		if not last_status:
+			logging.info("Coin latest status not filled")
+			return
+ 
+		if user_data['preference'][coin]['lastOrder'] == 'PENDING':
+			user_data['preference'][coin]['lastOrder'] = 'FILLED'
+			user_data['preference'][coin]['coin_amount'] = self.get_wallet(asset=coin)
+			user_data['preference'][coin]['holdings'] = self.get_balance(coin=coin)
+			
 
 		if action == 'buy':
 			limit = Decimal(allocation * wallet)
 			wallet_factor = -1
 			holding_coin_factor = 1
 			user_data['preference'][coin]['quota'] = True
-			self.client.create_order(symbol=''.join([coin,BASE_cOIN]),side=action,type='TAKE_PROFIT')
+			user_data['preference'][coin]['desired_action']='sell'
+			
 			
 
 		elif action == 'sell':
@@ -171,6 +224,7 @@ class NMC():
 			wallet_factor = 1
 			holding_coin_factor = -1
 			user_data['preference'][coin]['quota'] = False
+			user_data['preference'][coin]['desired_action']='buy'
 
 		else:
 			raise Exception('action needed')
@@ -178,34 +232,25 @@ class NMC():
 		fee = limit * FEE
 		real_limit = limit - fee
 		new_coins = real_limit/current_price
-		user_data['wallet'] += limit * wallet_factor
-		user_data['preference'][coin]['holdings'] += real_limit * holding_coin_factor
-		user_data['preference'][coin]['coin_amount'] += new_coins * holding_coin_factor
-		logging.info("User %s, %s:%s worth of %s"%(user_data["name"],action,real_limit,coin))
-		logging.info("After Wallet %s"%(user_data['wallet']))
+		try:
+			transaction_call = self.client.create_order(symbol=symbol,side=action,type='TAKE_PROFIT',quantity=new_coins,price=desired_price)
+			orderId = transaction_call['RESULT']['orderId']
+			sleep(TRANSACTION_WAIT)
+		except Exception as e:
+			logging.error("Could not place order: %s"%(str(e)))
+			return False
+
+		user_data['wallet'] = self.get_wallet()
+		transaction_status = self.getOrderStatus(coin,user_data,orderId=orderId)
+		user_data['preference'][coin]['lastOrderId'] = orderId
+		user_data['preference'][coin]['lastOrder'] = 'PENDING' if not transaction_status else 'FILLED'
+		user_data['preference'][coin]['coin_amount'] = self.get_wallet(asset=coin)
+		user_data['preference'][coin]['holdings']  = self.get_balance(coin=coin)
+		logging.info("User %s, is %sing %s worth of %s"%(user_data["name"],action,desired_price*new_coins,coin))
+		logging.info("After transaction, wallet is now %s"%(user_data['wallet']))
 		logging.info("Holdings %s\nCoin Amount %s"%(user_data['preference'][coin]['holdings'],user_data['preference'][coin]['coin_amount']))
 
 def handler(event, context):
 	_=NMC()
 
-'''
 
-Compare the price of each coin in preference
-
-we dont have the coin
-	if any quotes.USD.percent_change <= buy:
-		can we afford it(at most allocation amount or lower)
-			yes - purchase allocation amount or lower
-				update holdings,coin_amount, wallet
-	
-
-we already have the coin
-	if (current_price - worth_per_coin)/100 <= buy
-		can we afford it
-			yes - purchase allocation amount or lower
-				update holdings,coin_amount, wallet
-	elif (current_price - worth_per_coin)/100 >= sell
-		sell the coin
-			update holdings,coin_amount, wallet
-
-'''
