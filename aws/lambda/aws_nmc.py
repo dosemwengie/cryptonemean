@@ -1,4 +1,4 @@
-from decimal import Decimal
+from decimal import *
 import boto3
 import json
 import requests
@@ -10,6 +10,8 @@ from time import sleep
 
 #coin_table=boto3.resource('dynamodb',endpoint_url='http://localhost:8000').Table('coins')
 #user_table=boto3.resource('dynamodb',endpoint_url='http://localhost:8000').Table('users')
+
+getcontext().prec = 7
 
 logging.basicConfig(format='%(asctime)s %(message)s',level=logging.INFO)
 
@@ -38,7 +40,7 @@ user_example = {'preference': {
  'wallet': Decimal('250.0')}
 
 API_KEY_PARAM = 'bn_api_key'
-API_SECRET_PARAM = 'bn_secret_param'
+API_SECRET_PARAM = 'bn_secret_key'
 BASE_COIN = 'USDT'
 URL = 'https://api.coinmarketcap.com/v2/ticker/?convert=USD&limit=50'
 FEE = Decimal('0.001')
@@ -49,21 +51,23 @@ class NMC():
 	def __init__(self):
 		self.region=os.environ.get('AWS_REGION')
 		self.coin_table,self.user_table = None, None
+		self.client = None
 		self.ssm = boto3.client('ssm')
-		self.api_key, self.api_secret = None, None
-		self.get_api_s()
-		self.client = Client(self.api_key, self.api_secret)
 		self.set_db()
 		self.fetch_online_data()
-		#self.insert_data()
 		self.map_user_evaluation()
+		
 
-	def get_api_s(self):
-		self.api_key = self.ssm.get_parameter(API_KEY_PARAM, WithDecryption=True)
-		self.api_secret = self.ssm.get_parameter(API_SECRET_PARAM, WithDecryption=True)
+	def get_api_s(self,user):
+		user_api_key = '_'.join([user,API_KEY_PARAM])
+		user_secret_key = '_'.join([user,API_SECRET_PARAM])
+		api_key = self.ssm.get_parameter(Name=user_api_key, WithDecryption=True)['Parameter']['Value']
+		api_secret = self.ssm.get_parameter(Name=user_secret_key, WithDecryption=True)['Parameter']['Value']
+		return (api_key,api_secret)
 
 	def set_db(self):
 		if not self.region:
+			logging.info("Using local db")
 			self.coin_table = boto3.resource('dynamodb',endpoint_url='http://localhost:8000').Table('coins')
 			self.user_table = boto3.resource('dynamodb',endpoint_url='http://localhost:8000').Table('users')
 		else:
@@ -126,20 +130,25 @@ class NMC():
 		map(self.data_evaluation,users)
 
 	def data_evaluation(self,user_data):
+		user = user_data['name']
+		api_key,secret_key = self.get_api_s(user)
+		self.client = Client(api_key, secret_key)
+		user_data['wallet'] = self.get_wallet()
 		logging.info("User: %s"%(user_data['name']))
 		for coin in user_data['preference']:
 			logging.info("Checking coin: %s"%(coin))
 			coin_data = user_data['preference'][coin]
 			can_sell, can_buy = False, False
 			current_price = self.online_data[coin]['quotes']['USD']['price']
-			current_price = Decimal(current_price)
+			current_price = Decimal(current_price) * Decimal(1)
+			print("Current Price: %s"%(current_price))
 			percentages = [ self.online_data[coin]['quotes']['USD'][x] for x in self.online_data[coin]['quotes']['USD'] if x.startswith('percent_change')]
 			user_data['preference'][coin]['coin_amount'] = self.get_wallet(asset=coin)
 			user_data['preference'][coin]['holdings'] = self.get_balance(coin=coin)
 			buy_percentage = coin_data['buy']*100
 			sell_percentage = coin_data['sell']*100
 			logging.info("Percentages: %s"%(percentages))
-			logging.info(coin_data)
+			#logging.info(coin_data)
 			if coin_data['coin_amount'] == 0:
 				if buy_percentage >= min(percentages):
 					can_buy = True
@@ -151,29 +160,32 @@ class NMC():
 				elif (current_price - worth_per_coin)/100 >= sell_percentage and desired_action == 'sell':
 					can_sell = True 
 			
-			logging.info("Before Wallet %s"%(user_data['wallet']))
+			#logging.info("Before Wallet %s"%(user_data['wallet']))
 			if can_buy:
 				self.do_transaction(coin,user_data,current_price,action='BUY')
 			if can_sell:
 				self.do_transaction(coin,user_data,current_price,action='SELL')
+			print("\n")
 		logging.info(user_data)
+		logging.info("\nNet Worth: %s"%(self.get_balance()))
+		self.reset_client()
 		self.user_table.put_item(Item=user_data)
 		print
 
 	def get_balance(self, coin=None):
 		account = self.client.get_account()		
 		if coin is None:		
-			balances = [x for x in account['balances'] if float(x['free']) > 0]
+			balances = [x for x in account['balances'] if float(x['free']) > 0 ]
 		else:
 			balances = [x for x in account['balances'] if float(x['free']) > 0 and x['asset'] == coin]
 		balance = 0
 		for ticker in balances:
-			symbol = ticker['asset']
+			symbol = ticker['asset'] if ticker['asset'] != BASE_COIN else 'TUSD'
 			amount = float(ticker['free'])
 			current_price = self.client.get_symbol_ticker(symbol=''.join([symbol,BASE_COIN]))
 			current_price = float(current_price.get('price'))
 			balance += current_price*amount
-		return balance
+		return Decimal(balance) * Decimal(1)
 
 	def get_wallet(self, asset=None):
 		if asset is None:
@@ -192,6 +204,9 @@ class NMC():
 		status = result['status']
 		logging.info("Coin: %s, status: %s"%(coin,status))
 		return status == 'FILLED' 
+	
+	def reset_client(self):
+		self.client = None
 
 	def do_transaction(self,coin,user_data,current_price,action=None):
 		wallet = self.get_wallet()
@@ -231,12 +246,19 @@ class NMC():
 		fee = limit * FEE
 		real_limit = limit - fee
 		new_coins = real_limit/current_price
+		symbol_info = self.client.get_symbol_info(symbol=symbol)
+		logging.info(symbol_info)
+		price_filter = [x for x in symbol_info['filters'] if x['filterType']=='PRICE_FILTER'][0]
+		tickSize = Decimal(price_filter['tickSize'])
+		price = closestNumber(current_price,tickSize)
 		try:
-			transaction_call = self.client.create_order(symbol=symbol,side=action,type='TAKE_PROFIT',quantity=new_coins,price=current_price,stopPrice=current_price)
-			orderId = transaction_call['RESULT']['orderId']
+			logging.info("\nsymbol:%s\nside:%s\nquantity:%s\nprice:%s\n"%(symbol,action,new_coins,price))
+			transaction_call = self.client.create_order(symbol=symbol,side=action,type='LIMIT',quantity=new_coins,price=price,timeInForce='GTC')
+			orderId = transaction_call['orderId']
 			sleep(TRANSACTION_WAIT)
 		except Exception as e:
 			logging.error("Could not place order: %s"%(str(e)))
+			user_data['preference'][coin]['quota'] = not user_data['preference'][coin]['quota']
 			return False
 
 		user_data['wallet'] = self.get_wallet()
@@ -245,12 +267,33 @@ class NMC():
 		user_data['preference'][coin]['lastOrder'] = 'PENDING' if not transaction_status else 'FILLED'
 		user_data['preference'][coin]['coin_amount'] = self.get_wallet(asset=coin)
 		user_data['preference'][coin]['holdings']  = self.get_balance(coin=coin)
-		user_data['preference'][coin]['lastPrice'] = current_price
-		logging.info("User %s, is %sing %s worth of %s"%(user_data["name"],action,current_price*new_coins,coin))
+		user_data['preference'][coin]['lastPrice'] = price
+		logging.info("User %s, is %sing %s worth of %s"%(user_data["name"],action,price*new_coins,coin))
 		logging.info("After transaction, wallet is now %s"%(user_data['wallet']))
 		logging.info("Holdings %s\nCoin Amount %s"%(user_data['preference'][coin]['holdings'],user_data['preference'][coin]['coin_amount']))
+		
 
 def handler(event, context):
 	_=NMC()
+
+def closestNumber(n, m) :
+    # Find the quotient
+    q = n // m
+     
+    # 1st possible closest number
+    n1 = m * q
+     
+    # 2nd possible closest number
+    if((n * m) > 0) :
+        n2 = (m * (q + 1)) 
+    else :
+        n2 = (m * (q - 1))
+     
+    # if true, then n1 is the required closest number
+    if (abs(n - n1) < abs(n - n2)) :
+        return n1
+     
+    # else n2 is the required closest number 
+    return n2
 
 
