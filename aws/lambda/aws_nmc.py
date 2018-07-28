@@ -153,14 +153,14 @@ class NMC():
 			user_data['preference'][coin]['holdings'] = self.get_balance(coin=coin)
 			buy_percentage = coin_data['buy']*100
 			sell_percentage = coin_data['sell']*100
-			print("%s Percentages: %s"%(coin,percentages))
+			print("%s: Percentages: %s"%(coin,percentages))
 			if coin_data['coin_amount'] == 0:
 				if buy_percentage >= min(percentages):
 					can_buy = True
 			else:
 				worth_per_coin = coin_data['lastPrice']		
 				desired_action = user_data['preference'][coin]['desired_action']
-				print("%s: Current_price: %s worth_per_coin: %s\n%sRatio: %s%% %s?"%(coin,current_price,worth_per_coin,coin,((current_price-worth_per_coin)/worth_per_coin)*100,desired_action))
+				print("%s: Current_price: %s worth_per_coin: %s\n%s: Ratio: %s%% %s?"%(coin,current_price,worth_per_coin,coin,((current_price-worth_per_coin)/worth_per_coin)*100,desired_action))
 				if (current_price - worth_per_coin)/worth_per_coin <= buy_percentage and desired_action == 'buy':
 					can_buy = True
 				elif (current_price - worth_per_coin)/worth_per_coin >= sell_percentage and desired_action == 'sell':
