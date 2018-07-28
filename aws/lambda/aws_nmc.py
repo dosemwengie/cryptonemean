@@ -8,9 +8,6 @@ from binance.client import Client
 import logging
 from time import sleep
 
-#coin_table=boto3.resource('dynamodb',endpoint_url='http://localhost:8000').Table('coins')
-#user_table=boto3.resource('dynamodb',endpoint_url='http://localhost:8000').Table('users')
-
 getcontext().prec = 7
 
 root = logging.getLogger()
@@ -68,6 +65,11 @@ class NMC():
 		api_key = self.ssm.get_parameter(Name=user_api_key, WithDecryption=True)['Parameter']['Value']
 		api_secret = self.ssm.get_parameter(Name=user_secret_key, WithDecryption=True)['Parameter']['Value']
 		return (api_key,api_secret)
+
+	def get_slack(self,user):
+		user_channel = '_'.join([user,'slack_channel'])
+		response = self.ssm.get_parameter(Name=user_channel, WithDecryption=True)['Parameter']['Value']
+		return response
 
 	def set_db(self):
 		if not self.region:
@@ -138,30 +140,30 @@ class NMC():
 		api_key,secret_key = self.get_api_s(user)
 		self.client = Client(api_key, secret_key)
 		user_data['wallet'] = self.get_wallet()
+		self.user_channel = self.get_slack(user)
 		logging.info("User: %s"%(user_data['name']))
 		for coin in user_data['preference']:
-			logging.info("Checking coin: %s"%(coin))
 			coin_data = user_data['preference'][coin]
 			can_sell, can_buy = False, False
 			current_price = self.online_data[coin]['quotes']['USD']['price']
 			current_price = Decimal(current_price) * Decimal(1)
-			print("Current Price: %s"%(current_price))
+			print("%s: Current Price: %s"%(coin,current_price))
 			percentages = [ self.online_data[coin]['quotes']['USD'][x] for x in self.online_data[coin]['quotes']['USD'] if x.startswith('percent_change')]
 			user_data['preference'][coin]['coin_amount'] = self.get_wallet(asset=coin)
 			user_data['preference'][coin]['holdings'] = self.get_balance(coin=coin)
 			buy_percentage = coin_data['buy']*100
 			sell_percentage = coin_data['sell']*100
-			logging.info("Percentages: %s"%(percentages))
-			#logging.info(coin_data)
+			print("%s Percentages: %s"%(coin,percentages))
 			if coin_data['coin_amount'] == 0:
 				if buy_percentage >= min(percentages):
 					can_buy = True
 			else:
 				worth_per_coin = coin_data['lastPrice']		
 				desired_action = user_data['preference'][coin]['desired_action']
-				if (current_price - worth_per_coin)/100 <= buy_percentage and desired_action == 'buy':
+				print("%s: Current_price: %s worth_per_coin: %s\n%sRatio: %s%% %s?"%(coin,current_price,coin,worth_per_coin,((current_price-worth_per_coin)/worth_per_coin)*100,desired_action))
+				if (current_price - worth_per_coin)/worth_per_coin <= buy_percentage and desired_action == 'buy':
 					can_buy = True
-				elif (current_price - worth_per_coin)/100 >= sell_percentage and desired_action == 'sell':
+				elif (current_price - worth_per_coin)/worth_per_coin >= sell_percentage and desired_action == 'sell':
 					can_sell = True 
 			
 			#logging.info("Before Wallet %s"%(user_data['wallet']))
@@ -169,12 +171,14 @@ class NMC():
 				self.do_transaction(coin,user_data,current_price,action='BUY')
 			if can_sell:
 				self.do_transaction(coin,user_data,current_price,action='SELL')
-			print("\n")
-		logging.info(user_data)
-		logging.info("\nNet Worth: %s"%(self.get_balance()))
+		print(user_data)
+		net_worth_msg = "\nNet Worth: %s"%(self.get_balance())
+		print(net_worth_msg)
+		payload = {'text': net_worth_msg}
+		requests.post(self.user_channel, data=json.dumps(payload))
 		self.reset_client()
+		self.reset_slack()
 		self.user_table.put_item(Item=user_data)
-		print
 
 	def get_balance(self, coin=None):
 		account = self.client.get_account()		
@@ -206,11 +210,14 @@ class NMC():
 		symbol = ''.join([coin, BASE_COIN])
 		result = self.client.get_order(symbol=symbol, orderId=orderId)
 		status = result['status']
-		logging.info("Coin: %s, status: %s"%(coin,status))
+		print("Coin: %s, status: %s"%(coin,status))
 		return status == 'FILLED' 
 	
 	def reset_client(self):
 		self.client = None
+
+	def reset_slack(self):
+		self.user_channel = None
 
 	def do_transaction(self,coin,user_data,current_price,action=None):
 		wallet = self.get_wallet()
@@ -236,6 +243,7 @@ class NMC():
 			limit = Decimal(allocation * wallet)
 			user_data['preference'][coin]['quota'] = True
 			user_data['preference'][coin]['desired_action']='sell'
+			message = "Purchased: $"
 			
 			
 
@@ -243,6 +251,7 @@ class NMC():
 			limit = Decimal(current_price * coin_amount)
 			user_data['preference'][coin]['quota'] = False
 			user_data['preference'][coin]['desired_action']='buy'
+			message = "Profit: $"
 
 		else:
 			raise Exception('action needed')
@@ -251,20 +260,22 @@ class NMC():
 		real_limit = limit - fee
 		new_coins = real_limit/current_price
 		symbol_info = self.client.get_symbol_info(symbol=symbol)
-		logging.info(symbol_info)
 		price_filter = [x for x in symbol_info['filters'] if x['filterType']=='PRICE_FILTER'][0]
 		tickSize = Decimal(price_filter['tickSize'])
 		price = closestNumber(current_price,tickSize)
 		try:
-			logging.info("\nsymbol:%s\nside:%s\nquantity:%s\nprice:%s\n"%(symbol,action,new_coins,price))
+			print("\nsymbol:%s\nside:%s\nquantity:%s\nprice:%s\n"%(symbol,action,new_coins,price))
 			transaction_call = self.client.create_order(symbol=symbol,side=action,type='LIMIT',quantity=new_coins,price=price,timeInForce='GTC')
 			orderId = transaction_call['orderId']
 			sleep(TRANSACTION_WAIT)
 		except Exception as e:
-			logging.error("Could not place order: %s"%(str(e)))
+			print("Could not place order: %s"%(str(e)))
 			user_data['preference'][coin]['quota'] = not user_data['preference'][coin]['quota']
 			return False
-
+		combined_msg = "%s: %s%s"%(coin,message,price*new_coins)
+		print(combined_msg)
+		payload = {'text': combined_msg}
+		requests.post(self.user_channel, data=json.dumps(payload))
 		user_data['wallet'] = self.get_wallet()
 		transaction_status = self.getOrderStatus(coin,user_data,orderId=orderId)
 		user_data['preference'][coin]['lastOrderId'] = orderId
@@ -272,9 +283,9 @@ class NMC():
 		user_data['preference'][coin]['coin_amount'] = self.get_wallet(asset=coin)
 		user_data['preference'][coin]['holdings']  = self.get_balance(coin=coin)
 		user_data['preference'][coin]['lastPrice'] = price
-		logging.info("User %s, is %sing %s worth of %s"%(user_data["name"],action,price*new_coins,coin))
-		logging.info("After transaction, wallet is now %s"%(user_data['wallet']))
-		logging.info("Holdings %s\nCoin Amount %s"%(user_data['preference'][coin]['holdings'],user_data['preference'][coin]['coin_amount']))
+		print("User %s, is %sing %s worth of %s"%(user_data["name"],action,price*new_coins,coin))
+		print("After transaction, wallet is now %s"%(user_data['wallet']))
+		print("Holdings %s\nCoin Amount %s"%(user_data['preference'][coin]['holdings'],user_data['preference'][coin]['coin_amount']))
 		
 
 def handler(event, context):
