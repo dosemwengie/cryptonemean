@@ -174,8 +174,6 @@ class NMC():
 		print(user_data)
 		net_worth_msg = "\nNet Worth: %s"%(self.get_balance())
 		print(net_worth_msg)
-		payload = {'text': net_worth_msg}
-		requests.post(self.user_channel, data=json.dumps(payload))
 		self.reset_client()
 		self.reset_slack()
 		self.user_table.put_item(Item=user_data)
@@ -272,7 +270,7 @@ class NMC():
 			print("Could not place order: %s"%(str(e)))
 			user_data['preference'][coin]['quota'] = not user_data['preference'][coin]['quota']
 			return False
-		combined_msg = "%s: %s%s"%(coin,message,price*new_coins)
+		combined_msg = "%s: %s%s\nNet Worth: %s"%(coin,message,price*new_coins,self.get_balance())
 		print(combined_msg)
 		payload = {'text': combined_msg}
 		requests.post(self.user_channel, data=json.dumps(payload))
