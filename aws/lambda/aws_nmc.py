@@ -47,6 +47,10 @@ URL = 'https://api.coinmarketcap.com/v2/ticker/?convert=USD&limit=50'
 FEE = Decimal('0.001')
 THRESHOLD=86400
 TRANSACTION_WAIT=10
+BN_TRANSLATE = {
+'IOTA':'MIOTA'
+}
+ERROR_CHANNEL = 'error_channel'
 
 class NMC():
 	def __init__(self):
@@ -55,6 +59,7 @@ class NMC():
 		self.client = None
 		self.ssm = boto3.client('ssm')
 		self.set_db()
+		self.set_error_channel()
 		self.fetch_online_data()
 		self.map_user_evaluation()
 		
@@ -70,6 +75,11 @@ class NMC():
 		user_channel = '_'.join([user,'slack_channel'])
 		response = self.ssm.get_parameter(Name=user_channel, WithDecryption=True)['Parameter']['Value']
 		return response
+
+	def set_error_channel(self):
+		response = self.ssm.get_parameter(Name=ERROR_CHANNEL, WithDecryption=True)['Parameter']['Value']
+		self.error_channel = response
+
 
 	def set_db(self):
 		if not self.region:
@@ -145,10 +155,11 @@ class NMC():
 		for coin in user_data['preference']:
 			coin_data = user_data['preference'][coin]
 			can_sell, can_buy = False, False
-			current_price = self.online_data[coin]['quotes']['USD']['price']
+			translated_coin = BN_TRANSLATE.get(coin,coin)
+			current_price = self.online_data[translated_coin]['quotes']['USD']['price']
 			current_price = Decimal(current_price) * Decimal(1)
 			print("%s: Current Price: %s"%(coin,current_price))
-			percentages = [ self.online_data[coin]['quotes']['USD'][x] for x in self.online_data[coin]['quotes']['USD'] if x.startswith('percent_change')]
+			percentages = [ self.online_data[translated_coin]['quotes']['USD'][x] for x in self.online_data[translated_coin]['quotes']['USD'] if x.startswith('percent_change')]
 			user_data['preference'][coin]['coin_amount'] = self.get_wallet(asset=coin)
 			user_data['preference'][coin]['holdings'] = self.get_balance(coin=coin)
 			buy_percentage = coin_data['buy']*100
@@ -260,17 +271,24 @@ class NMC():
 		symbol_info = self.client.get_symbol_info(symbol=symbol)
 		price_filter = [x for x in symbol_info['filters'] if x['filterType']=='PRICE_FILTER'][0]
 		tickSize = Decimal(price_filter['tickSize'])
+		lot_size_filter = [x for x in symbol_info['filters'] if x['filterType']=='LOT_SIZE'][0]
+		lotSize = Decimal(lot_size_filter['stepSize'])
 		price = closestNumber(current_price,tickSize)
+		quantity = closestNumber(new_coins, lotSize)
 		try:
 			print("\nsymbol:%s\nside:%s\nquantity:%s\nprice:%s\n"%(symbol,action,new_coins,price))
-			transaction_call = self.client.create_order(symbol=symbol,side=action,type='LIMIT',quantity=new_coins,price=price,timeInForce='GTC')
+			transaction_call = self.client.create_order(symbol=symbol,side=action,type='LIMIT',quantity=quantity,price=price,timeInForce='GTC')
 			orderId = transaction_call['orderId']
 			sleep(TRANSACTION_WAIT)
 		except Exception as e:
-			print("Could not place order: %s"%(str(e)))
+			err_msg="Could not place order: %s"%(str(e))
 			user_data['preference'][coin]['quota'] = not user_data['preference'][coin]['quota']
+			user_data['preference'][coin]['desired_action']='buy' if user_data['preference'][coin]['desired_action']=='sell' else 'sell'
+			print(err_msg)
+			payload = {'text': err_msg}
+			requests.post(self.error_channel, data=json.dumps(payload))
 			return False
-		combined_msg = "%s: %s%s\nNet Worth: %s"%(coin,message,price*new_coins,self.get_balance())
+		combined_msg = "%s: %s%s\nNet Worth: %s"%(coin,message,price*quantity,self.get_balance())
 		print(combined_msg)
 		payload = {'text': combined_msg}
 		requests.post(self.user_channel, data=json.dumps(payload))
@@ -281,7 +299,7 @@ class NMC():
 		user_data['preference'][coin]['coin_amount'] = self.get_wallet(asset=coin)
 		user_data['preference'][coin]['holdings']  = self.get_balance(coin=coin)
 		user_data['preference'][coin]['lastPrice'] = price
-		print("User %s, is %sing %s worth of %s"%(user_data["name"],action,price*new_coins,coin))
+		print("User %s, is %sing %s worth of %s"%(user_data["name"],action,price*quantity,coin))
 		print("After transaction, wallet is now %s"%(user_data['wallet']))
 		print("Holdings %s\nCoin Amount %s"%(user_data['preference'][coin]['holdings'],user_data['preference'][coin]['coin_amount']))
 		
